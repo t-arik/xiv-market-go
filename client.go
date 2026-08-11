@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Client struct {
@@ -22,10 +24,41 @@ func DefaultRestClient() *Client {
 	if err != nil {
 		panic(err)
 	}
+
 	return &Client{
 		address: address,
-		client:  http.DefaultClient,
+		client: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
 	}
+}
+
+func (client *Client) MarketableItems(ctx context.Context) ([]int, error) {
+	addr := client.address.JoinPath("api", "v2", "marketable")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var result []int
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (client *Client) MostRecentlyUpdatedItems(ctx context.Context, world string, dc string) ([]WorldItemRecency, error) {
@@ -35,9 +68,11 @@ func (client *Client) MostRecentlyUpdatedItems(ctx context.Context, world string
 	if world != "" {
 		values.Add("world", world)
 	}
+
 	if dc != "" {
 		values.Add("dcName", dc)
 	}
+
 	values.Add("entries", "200")
 
 	addr.RawQuery = values.Encode()
@@ -90,9 +125,11 @@ func (client *Client) StreamMostRecentlyUpdatedItems(
 			if err != nil {
 				return err
 			}
+
 			slices.SortFunc(newItems, func(a, b WorldItemRecency) int {
 				return int(a.LastUploadTime - b.LastUploadTime)
 			})
+
 			for _, item := range newItems {
 				if !slices.Contains(prevItems, item) {
 					select {
@@ -102,6 +139,7 @@ func (client *Client) StreamMostRecentlyUpdatedItems(
 					}
 				}
 			}
+
 			prevItems = newItems
 		}
 	}
@@ -150,9 +188,11 @@ func (client *Client) MarketBoardCurrentData(ctx context.Context, itemIds []int,
 			if result[i].RegionName == "" && view.RegionName != "" {
 				result[i].RegionName = view.RegionName
 			}
+
 			if result[i].DcName == "" && view.DcName != "" {
 				result[i].DcName = view.DcName
 			}
+
 			if result[i].WorldName == "" && view.WorldName != "" {
 				result[i].WorldName = view.WorldName
 			}
@@ -164,9 +204,11 @@ func (client *Client) MarketBoardCurrentData(ctx context.Context, itemIds []int,
 			if view.Listings[i].ItemId == 0 && view.ItemId != 0 {
 				view.Listings[i].ItemId = view.ItemId
 			}
+
 			if view.Listings[i].WorldId == 0 && view.WorldId != 0 {
 				view.Listings[i].WorldId = view.WorldId
 			}
+
 			if view.Listings[i].WorldName == "" && view.WorldName != "" {
 				view.Listings[i].WorldName = view.WorldName
 			}
@@ -176,9 +218,11 @@ func (client *Client) MarketBoardCurrentData(ctx context.Context, itemIds []int,
 			if view.RecentHistory[i].ItemId == 0 && view.ItemId != 0 {
 				view.RecentHistory[i].ItemId = view.ItemId
 			}
+
 			if view.RecentHistory[i].WorldId == 0 && view.WorldId != 0 {
 				view.RecentHistory[i].WorldId = view.WorldId
 			}
+
 			if view.RecentHistory[i].WorldName == "" && view.WorldName != "" {
 				view.RecentHistory[i].WorldName = view.WorldName
 			}

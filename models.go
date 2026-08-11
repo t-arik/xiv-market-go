@@ -165,7 +165,7 @@ type WorldItemRecency struct {
 	// The last upload time for the item on the listed world.
 	LastUploadTime int64 `json:"lastUploadTime"`
 	// The world ID.
-	WorldId int32 `json:"worldID"`
+	// WorldId int32 `json:"worldID"`
 	// The world name.
 	WorldName string `json:"worldName"`
 }
@@ -185,4 +185,10 @@ type MultiView[T any] struct {
 	UnresolvedItems []int32 `json:"unresolvedItems"`
 	// The name of the world requested, if applicable.
 	WorldName string `json:"worldName"`
+}
+
+type DataCenter struct {
+	Name   string  `json:"name"`
+	Region string  `json:"region"`
+	Worlds []int32 `json:"worlds"`
 }

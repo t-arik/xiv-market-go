@@ -27,11 +27,13 @@ func (q *queue) MinLastUploadTime() xivmarketgo.WorldItemRecency {
 func (q *queue) Batch() []xivmarketgo.WorldItemRecency {
 	world := q.MinLastUploadTime().WorldName
 	worldItems := []xivmarketgo.WorldItemRecency{}
+
 	for _, item := range q.buf {
 		if item.WorldName == world {
 			worldItems = append(worldItems, item)
 		}
 	}
+
 	slices.SortFunc(q.buf, func(a, b xivmarketgo.WorldItemRecency) int {
 		return int(a.LastUploadTime - b.LastUploadTime)
 	})
@@ -46,5 +48,6 @@ func (q *queue) Remove(cutset []xivmarketgo.WorldItemRecency) {
 			newBuf = append(newBuf, item)
 		}
 	}
+
 	q.buf = newBuf
 }
