@@ -15,7 +15,18 @@ func (q *queue) Len() int {
 }
 
 func (q *queue) Add(item xivmarketgo.WorldItemRecency) {
-	q.buf = append(q.buf, item)
+	idx := slices.IndexFunc(q.buf, func(existing xivmarketgo.WorldItemRecency) bool {
+		return existing.ItemId == item.ItemId && existing.WorldName == item.WorldName
+	})
+
+	if idx == -1 {
+		q.buf = append(q.buf, item)
+		return
+	}
+
+	if item.LastUploadTime > q.buf[idx].LastUploadTime {
+		q.buf[idx] = item
+	}
 }
 
 func (q *queue) MinLastUploadTime() xivmarketgo.WorldItemRecency {
