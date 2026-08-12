@@ -14,33 +14,19 @@ import (
 	"time"
 
 	xivmarketgo "github.com/t-arik/xiv-market-go"
-	"go.opentelemetry.io/otel"
 )
 
 func main() {
-	if err := execute(); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
 	}
 }
 
-func execute() error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+func run() error {
+	signalCtx, signalCancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer signalCancel()
 
-	shutdown, err := setupTelemetry(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = run(ctx)
-	return errors.Join(err, shutdown(context.Background()))
-}
-
-func run(ctx context.Context) error {
-	ctx, span := otel.Tracer(instrumentationName).Start(ctx, "export.run")
-	defer span.End()
-
-	ctx, cancel := context.WithCancelCause(ctx)
+	ctx, cancel := context.WithCancelCause(signalCtx)
 	defer cancel(nil)
 
 	region := flag.String("region", "", "")
@@ -140,7 +126,7 @@ func processRecent(
 
 			items, err := client.MarketBoardCurrentData(ctx, ids, batch[0].WorldName)
 			if err != nil {
-				slog.ErrorContext(ctx, fmt.Errorf("error fetching market board data: %w", err).Error())
+				slog.ErrorContext(ctx, "error fetching market board data", "err", err)
 				time.Sleep(time.Second)
 				continue
 			}
@@ -149,7 +135,12 @@ func processRecent(
 				current <- item
 			}
 
-			slog.InfoContext(ctx, "processed batch", "world", batch[0].WorldName, "count", len(batch))
+			slog.InfoContext(ctx, "processed batch",
+				"world", batch[0].WorldName,
+				"count", len(batch),
+				"items", len(items),
+				"buf", buf.Len(),
+			)
 			buf.Remove(batch)
 		}
 	}
@@ -163,6 +154,10 @@ func fetchInitial(
 	current chan xivmarketgo.CurrentlyShown,
 ) {
 	slog.InfoContext(ctx, "goroutine", "name", "FetchMarketBoardData")
+
+	total := len(worlds) * len(itemIDs)
+
+	completed := 0
 
 	for _, world := range worlds {
 		for ids := range slices.Chunk(itemIDs, 50) {
@@ -178,16 +173,22 @@ func fetchInitial(
 					}
 
 					if err != nil {
-						slog.ErrorContext(ctx, fmt.Errorf("error fetching market board data: %w", err).Error())
+						slog.ErrorContext(ctx, "error fetching market board data", "err", err)
 						time.Sleep(time.Second)
 						continue retry
 					}
 
 					for _, item := range items {
 						current <- item
+						completed += 1
 					}
 
-					slog.InfoContext(ctx, "fetched market board data", "world", world, "count", len(items))
+					slog.InfoContext(ctx, "fetched market board data",
+						"world", world,
+						"batch", len(ids),
+						"count", len(items),
+						"progress", fmt.Sprintf("%d/%d (%.2f%%)", completed, total, float64(completed)/float64(total)*100),
+					)
 					break retry
 				}
 			}
