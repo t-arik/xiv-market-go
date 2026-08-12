@@ -1,0 +1,25 @@
+name: Publish
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - uses: ko-build/setup-ko@v0.8
+      - run: ko build -B --platform all --sbom none --tag-only --tags "${TAG#v}" ./cmd/*
+        env:
+          TAG: ${{ github.ref_name }}
