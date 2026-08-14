@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path"
@@ -39,11 +38,6 @@ func run() error {
 		return nil
 	}
 
-	worlds, ok := xivmarketgo.WorldsByRegion[*region]
-	if !ok {
-		return fmt.Errorf("unknown region %s", *region)
-	}
-
 	client := xivmarketgo.DefaultRestClient()
 
 	itemIDs, err := client.MarketableItems(ctx)
@@ -51,83 +45,63 @@ func run() error {
 		return err
 	}
 
-	rand.Shuffle(len(worlds), func(i, j int) {
-		worlds[i], worlds[j] = worlds[j], worlds[i]
-	})
+	retryCount := 0
 
-	rand.Shuffle(len(itemIDs), func(i, j int) {
-		itemIDs[i], itemIDs[j] = itemIDs[j], itemIDs[i]
-	})
+	for i, itemId := range itemIDs {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		retry:
+			for {
+				ids := []int{itemId}
 
-	total := len(worlds) * len(itemIDs)
-
-	backoff := time.Duration(time.Second)
-
-	completed := 0
-
-	chunkSize := 50
-
-	for _, world := range worlds {
-		for i := 0; i < len(itemIDs); i += chunkSize {
-			select {
-			case <-ctx.Done():
-				return nil
-			default:
-			retry:
-				for {
-					chunkSize = min(chunkSize+8, 100)
-
-					ids := itemIDs[i:min(i+chunkSize, len(itemIDs))]
-
-					items, err := client.MarketBoardCurrentData(ctx, ids, world)
-					if errors.Is(err, context.Canceled) {
-						return nil
-					}
-
-					if err != nil {
-						slog.ErrorContext(ctx, "error fetching market board data", "err", err)
-
-						chunkSize = max(1, chunkSize/2)
-
-						time.Sleep(backoff)
-						backoff += time.Second
-
-						continue retry
-					}
-
-					backoff = min(time.Second)
-
-					for _, item := range items {
-						name := fmt.Sprintf("%d-%d-%s.json", item.LastUploadTime, item.ItemId, item.WorldName)
-						file := path.Join(*outDir, name)
-
-						f, err := os.Create(file)
-						if err != nil {
-							return fmt.Errorf("error creating file %s: %w", file, err)
-						}
-
-						if err := json.NewEncoder(f).Encode(item); err != nil {
-							return fmt.Errorf("error encoding item to JSON: %w", err)
-						}
-
-						if err := f.Close(); err != nil {
-							return fmt.Errorf("error closing file: %w", err)
-						}
-
-						completed += 1
-					}
-
-					slog.InfoContext(ctx, "fetched market board data",
-						"world", world,
-						"batch", len(ids),
-						"count", len(items),
-						"completed", completed,
-						"total", total,
-						"progress", fmt.Sprintf("%.2f%%", float64(completed)/float64(total)*100),
-					)
-
-					break retry
+				items, err := client.MarketBoardCurrentData(ctx, ids, *region, 50_000)
+				if errors.Is(err, context.Canceled) {
+					return nil
 				}
+
+				if err != nil {
+					retryCount++
+					slog.Error("error fetching market board data", "err", err, "retryCount", retryCount)
+
+					if retryCount > 60 {
+						return fmt.Errorf("too many errors fetching market board data: %w", err)
+					}
+
+					time.Sleep(time.Second)
+
+					continue retry
+				}
+
+				retryCount = 0
+
+				for _, item := range items {
+					timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
+					name := fmt.Sprintf("%s_%d_%d_%s.json", timestamp, item.LastUploadTime, item.ItemId, *region)
+					file := path.Join(*outDir, name)
+
+					f, err := os.Create(file)
+					if err != nil {
+						return fmt.Errorf("error creating file %s: %w", file, err)
+					}
+
+					if err := json.NewEncoder(f).Encode(item); err != nil {
+						return fmt.Errorf("error encoding item to JSON: %w", err)
+					}
+
+					if err := f.Close(); err != nil {
+						return fmt.Errorf("error closing file: %w", err)
+					}
+				}
+
+				slog.Info("fetched market board data",
+					"completed", i+1,
+					"total", len(itemIDs),
+					"progress", fmt.Sprintf("%.2f%%", float64(i+1)/float64(len(itemIDs))*100),
+				)
+
+				break retry
 			}
 		}
 	}

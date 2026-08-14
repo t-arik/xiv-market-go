@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +118,8 @@ func (client *Client) StreamMostRecentlyUpdatedItems(
 
 	ticker := time.NewTicker(2 * time.Second)
 
+	errCount := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -123,8 +127,18 @@ func (client *Client) StreamMostRecentlyUpdatedItems(
 		case <-ticker.C:
 			newItems, err := client.MostRecentlyUpdatedItems(ctx, world, dc)
 			if err != nil {
-				return err
+				slog.Error("error fetching most recently updated items", "err", err)
+
+				if errCount > 5 {
+					return fmt.Errorf("too many errors fetching most recently updated items: %w", err)
+				}
+
+				errCount++
+
+				continue
 			}
+
+			errCount = 0
 
 			slices.SortFunc(newItems, func(a, b WorldItemRecency) int {
 				return int(a.LastUploadTime - b.LastUploadTime)
@@ -145,9 +159,21 @@ func (client *Client) StreamMostRecentlyUpdatedItems(
 	}
 }
 
-func (client *Client) MarketBoardCurrentData(ctx context.Context, itemIds []int, worldDcRegion string) ([]CurrentlyShown, error) {
+func (client *Client) MarketBoardCurrentData(
+	ctx context.Context,
+	itemIds []int,
+	worldDcRegion string,
+	saleEntries int,
+) ([]CurrentlyShown, error) {
 	itemIdsStr := strings.Join(strings.Fields(strings.Trim(fmt.Sprint(itemIds), "[]")), ",") // eek
+
 	addr := client.address.JoinPath("api", "v2", worldDcRegion, itemIdsStr)
+
+	if saleEntries != 0 {
+		q := addr.Query()
+		q.Add("entries", strconv.Itoa(saleEntries))
+		addr.RawQuery = q.Encode()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr.String(), nil)
 	if err != nil {

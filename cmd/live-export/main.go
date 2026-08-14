@@ -46,6 +46,7 @@ func run() error {
 
 	go func() {
 		if err := client.StreamMostRecentlyUpdatedItems(ctx, "", *region, recent); err != nil {
+			slog.Error("error streaming most recently updated items", "err", err)
 			cancel(err)
 		}
 	}()
@@ -69,7 +70,7 @@ func run() error {
 				ids = append(ids, int(item.ItemId))
 			}
 
-			items, err := client.MarketBoardCurrentData(ctx, ids, batch[0].WorldName)
+			items, err := client.MarketBoardCurrentData(ctx, ids, batch[0].WorldName, 1000)
 			if err != nil {
 				slog.ErrorContext(ctx, "error fetching market board data", "err", err)
 				time.Sleep(time.Second)
@@ -78,7 +79,8 @@ func run() error {
 			}
 
 			for _, item := range items {
-				name := fmt.Sprintf("%d-%d-%s.json", item.LastUploadTime, item.ItemId, item.WorldName)
+				timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
+				name := fmt.Sprintf("%s_%d_%d_%s.json", timestamp, item.LastUploadTime, item.ItemId, item.WorldName)
 				file := path.Join(*outDir, name)
 
 				f, err := os.Create(file)
