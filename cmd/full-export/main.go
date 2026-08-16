@@ -29,7 +29,7 @@ func run() error {
 	defer cancel(nil)
 
 	region := flag.String("region", "", "")
-	outDir := flag.String("outputDir", "", "")
+	outDir := flag.String("output-dir", "", "")
 
 	flag.Parse()
 

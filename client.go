@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Client struct {
@@ -29,9 +27,7 @@ func DefaultRestClient() *Client {
 
 	return &Client{
 		address: address,
-		client: &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
+		client:  http.DefaultClient,
 	}
 }
 
