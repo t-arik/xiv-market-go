@@ -15,6 +15,31 @@ import (
 	xivmarketgo "github.com/t-arik/xiv-market-go"
 )
 
+const (
+	minBatchSize = 1
+	maxBatchSize = 100
+)
+
+type adaptiveBatchSizer struct {
+	size int
+}
+
+func newAdaptiveBatchSizer() *adaptiveBatchSizer {
+	return &adaptiveBatchSizer{
+		size: maxBatchSize,
+	}
+}
+
+func (s *adaptiveBatchSizer) Failure() {
+	s.size = max(minBatchSize, s.size/2)
+}
+
+func (s *adaptiveBatchSizer) Success(batchSize int) {
+	if batchSize == s.size {
+		s.size = min(maxBatchSize, s.size+1)
+	}
+}
+
 func main() {
 	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
@@ -41,6 +66,7 @@ func run() error {
 	buf := &queue{}
 
 	client := xivmarketgo.DefaultRestClient()
+	batchSizer := newAdaptiveBatchSizer()
 
 	recent := make(chan xivmarketgo.WorldItemRecency, 4*1024)
 
@@ -63,7 +89,7 @@ func run() error {
 				continue
 			}
 
-			batch := buf.Batch()
+			batch := buf.Batch(batchSizer.size)
 
 			ids := []int{}
 			for _, item := range batch {
@@ -72,11 +98,25 @@ func run() error {
 
 			items, err := client.MarketBoardCurrentData(ctx, ids, batch[0].WorldName, 5)
 			if err != nil {
-				slog.Error("error fetching market board data", "err", err)
-				time.Sleep(time.Second)
+				batchSizer.Failure()
+				slog.Error("error fetching market board data",
+					"err", err,
+					"attempted_items", len(batch),
+					"next_batch_limit", batchSizer.size,
+					"retry_in", time.Second,
+				)
+
+				timer := time.NewTimer(time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return context.Cause(ctx)
+				case <-timer.C:
+				}
 
 				continue
 			}
+			batchSizer.Success(len(batch))
 
 			for _, item := range items {
 				timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
@@ -108,6 +148,7 @@ func run() error {
 				"world", batch[0].WorldName,
 				"count", len(batch),
 				"items", len(items),
+				"next_batch_limit", batchSizer.size,
 				"buf", buf.Len(),
 			)
 			buf.Remove(batch)
