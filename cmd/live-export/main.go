@@ -42,7 +42,7 @@ func run() error {
 
 	client := xivmarketgo.DefaultRestClient()
 
-	recent := make(chan xivmarketgo.WorldItemRecency, 8*1024)
+	recent := make(chan xivmarketgo.WorldItemRecency, 4*1024)
 
 	go func() {
 		if err := client.StreamMostRecentlyUpdatedItems(ctx, "", *region, recent); err != nil {
@@ -70,9 +70,9 @@ func run() error {
 				ids = append(ids, int(item.ItemId))
 			}
 
-			items, err := client.MarketBoardCurrentData(ctx, ids, batch[0].WorldName, 1000)
+			items, err := client.MarketBoardCurrentData(ctx, ids, batch[0].WorldName, 5)
 			if err != nil {
-				slog.ErrorContext(ctx, "error fetching market board data", "err", err)
+				slog.Error("error fetching market board data", "err", err)
 				time.Sleep(time.Second)
 
 				continue
@@ -98,13 +98,13 @@ func run() error {
 			}
 
 			if len(items) != len(batch) {
-				slog.WarnContext(ctx, "mismatch between batch and items",
+				slog.Warn("mismatch between batch and items",
 					"batch", batch,
 					"items", items,
 				)
 			}
 
-			slog.InfoContext(ctx, "processed batch",
+			slog.Info("processed batch",
 				"world", batch[0].WorldName,
 				"count", len(batch),
 				"items", len(items),
